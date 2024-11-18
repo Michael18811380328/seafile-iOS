@@ -27,7 +27,6 @@
 #import "Debug.h"
 #import "SeafPrivacyPolicyViewController.h"
 
-
 enum {
     SECTION_ACCOUNT = 0,
     SECTION_CAMERA,
@@ -367,6 +366,9 @@ enum {
         
         self.tableView.sectionHeaderTopPadding = 0;
     }
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(uploadTaskStatusChanged:) name:@"SeafUploadTaskStatusChanged" object:nil];
+
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -433,8 +435,10 @@ enum {
 
 // Updates the upload and download tasks information.
 -(void)updateSyncInfo{
-    NSInteger downloadingNum = [[SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection].fileQueue onGoingTaskNumber];
-    NSInteger uploadingNum = [[SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection].uploadQueue onGoingTaskNumber];
+    SeafAccountTaskQueue *accountTaskQueue= [SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection];
+    NSUInteger uploadingNum = accountTaskQueue.getOngoingTasks.count;
+    NSUInteger downloadingNum = accountTaskQueue.getOngoingDownloadTasks.count;
+
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.tableView.dragging == false && self.tableView.decelerating == false && self.tableView.tracking == false) {
             _downloadingCell.detailTextLabel.text = [NSString stringWithFormat:@"%lu",(long)downloadingNum];
@@ -472,6 +476,19 @@ enum {
     SeafDirViewController *c = [[SeafDirViewController alloc] initWithSeafDir:self.connection.rootFolder dirChosen:choose cancel:cancel chooseRepo:true];
     c.operationState = OPERATION_STATE_OTHER;
     [self.navigationController pushViewController:c animated:true];
+}
+
+- (void)uploadTaskStatusChanged:(NSNotification *)notification {
+    // 获取更新后的任务数组
+//    [self updateTaskArrays];
+    
+    // 在主线程更新 UI
+    dispatch_async(dispatch_get_main_queue(), ^{
+//        [self.tableView reloadData];
+        // 更新正在上传的数量显示
+        [self updateSyncInfo];
+//        [self updateUploadingTaskCount];
+    });
 }
 
 #pragma mark - Table view delegate
@@ -688,6 +705,10 @@ enum {
         _backgroundSyncSwitch.on = true;
         self.backgroundSync = true;
     }
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:@"SeafUploadTaskStatusChanged" object:nil];
 }
 
 @end

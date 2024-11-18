@@ -1,26 +1,24 @@
-//
 //  SeafBackgroundTaskManager.m
 //  Pods
 //
 //  Created by Wei W on 4/9/17.
 //
 //
+// SeafDataTaskManager.m
 
 #import "SeafDataTaskManager.h"
+#import "SeafUploadOperation.h"
+#import "SeafDownloadOperation.h"
+#import "SeafThumbOperation.h"
+#import "SeafAvatarOperation.h"
 #import "SeafDir.h"
 #import "Debug.h"
-#import "SeafFile.h"
 #import "SeafStorage.h"
 
-#define KEY_UPLOAD @"allUploadingTasks"
-#define KEY_DOWNLOAD @"allDownloadingTasks"
-#define KEY_UPLOADED @"allUploadedTasks"
 
 @interface SeafDataTaskManager()
 
-@property (nonatomic, strong) NSTimer *taskTimer;
-@property NSUserDefaults *storage;
-@property (nonatomic, strong) NSMutableDictionary *accountQueueDict;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, SeafAccountTaskQueue *> *accountQueueDict;
 
 @end
 
@@ -29,9 +27,10 @@
 + (SeafDataTaskManager *)sharedObject
 {
     static SeafDataTaskManager *object = nil;
-    if (!object) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
         object = [SeafDataTaskManager new];
-    }
+    });
     return object;
 }
 
@@ -40,41 +39,14 @@
     if (self = [super init]) {
         _accountQueueDict = [NSMutableDictionary new];
         _finishBlock = nil;
-        [self startTimer];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationWillEnterForeground:) name:UIApplicationWillEnterForegroundNotification object:nil];
     }
     return self;
 }
 
-/**
- * Starts a timer to periodically execute background tasks.
- */
-- (void)startTimer
-{
-    Debug("Start timer.");
-    self.taskTimer = [NSTimer scheduledTimerWithTimeInterval:1*60 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
-    [[AFNetworkReachabilityManager sharedManager] setReachabilityStatusChangeBlock:^(AFNetworkReachabilityStatus status) {
-        [self tick:nil];
-    }];
-}
+#pragma mark - Upload Tasks
 
-/**
- * A method called by the timer at regular intervals.
- * @param userInfo Additional user information that can be passed into the timer.
- */
-- (void)tick:(id)userInfo {
-    if (![[AFNetworkReachabilityManager sharedManager] isReachable]) {
-        return;
-    }
-    Debug("tick...");
-    for (SeafAccountTaskQueue *accountQueue in self.accountQueueDict.allValues) {
-        [accountQueue tick];
-    }
-}
-
-#pragma mark- upload
 - (BOOL)addUploadTask:(SeafUploadFile *)file {
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:file.accountIdentifier];
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:file.udir->connection];
     BOOL res = [accountQueue addUploadTask:file];
     if (res && file.retryable) {
         [self saveUploadFileToTaskStorage:file];
@@ -85,81 +57,16 @@
     return res;
 }
 
-- (void)removeUploadTask:(SeafUploadFile * _Nonnull)ufile forAccount:(SeafConnection * _Nonnull)conn
+- (void)removeUploadTask:(SeafUploadFile *)ufile forAccount:(SeafConnection * _Nonnull)conn
 {
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:conn.accountIdentifier];
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:conn];
     [accountQueue removeUploadTask:ufile];
 }
 
-- (void)cancelAutoSyncTasks:(SeafConnection *)conn
-{
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:conn.accountIdentifier];
-    NSMutableArray *arr = [[NSMutableArray alloc] init];
-    @synchronized (accountQueue.uploadQueue.allTasks) {
-        for (SeafUploadFile *ufile in accountQueue.uploadQueue.allTasks) {
-            if (ufile.uploadFileAutoSync && ufile.udir->connection == conn) {
-                [arr addObject:ufile];
-            }
-        }
-        for (SeafUploadFile *ufile in arr) {
-            [accountQueue.uploadQueue removeTask:ufile];
-        }
-    }
-    Debug("clear %ld photos", (long)arr.count);
-    for (SeafUploadFile *ufile in arr) {
-        [ufile cancel];
-    }
-}
+#pragma mark - Download Tasks
 
-- (void)cancelAutoSyncVideoTasks:(SeafConnection *)conn
-{
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:conn.accountIdentifier];
-    NSMutableArray *arr = [[NSMutableArray alloc] init];
-    @synchronized (accountQueue.uploadQueue.allTasks) {
-        for (SeafUploadFile *ufile in accountQueue.uploadQueue.allTasks) {
-            if (ufile.uploadFileAutoSync && ufile.udir->connection == conn && !ufile.isImageFile) {
-                [arr addObject:ufile];
-            }
-        }
-        for (SeafUploadFile *ufile in arr) {
-            [accountQueue.uploadQueue removeTask:ufile];
-        }
-    }
-    for (SeafUploadFile *ufile in arr) {
-        Debug("Remove autosync video file: %@, %@", ufile.lpath, ufile.assetURL);
-        [ufile cancel];
-    }
-}
-
-- (void)cancelAllDownloadTasks:(SeafConnection * _Nonnull)conn
-{
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:conn.accountIdentifier];
-    [accountQueue.fileQueue clearTasks];
-    [self removeAccountDownloadTaskFromStorage:conn.accountIdentifier];
-}
-
-- (void)cancelAllUploadTasks:(SeafConnection * _Nonnull)conn
-{
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:conn.accountIdentifier];
-    [accountQueue.uploadQueue clearTasks];
-    [self removeAccountUploadTaskFromStorage:conn.accountIdentifier];//remove the current account all uploadFile info from storage
-}
-
-- (void)noException:(void (^)(void))block
-{
-    @try {
-        block();
-    }
-    @catch (NSException *exception) {
-        Warning("Failed to run block:%@", block);
-    } @finally {
-    }
-
-}
-
-#pragma mark- download file
 - (void)addFileDownloadTask:(SeafFile * _Nonnull)dfile {
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:dfile.accountIdentifier];
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:dfile->connection];
     [accountQueue addFileDownloadTask:dfile];
     if (dfile.retryable) {
         [self saveFileToTaskStorage:dfile];
@@ -169,71 +76,56 @@
     }
 }
 
+#pragma mark - Avatar and Thumb Tasks
+
 - (void)addAvatarTask:(SeafAvatar * _Nonnull)avatar
 {
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:avatar.accountIdentifier];
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:avatar.connection];
     [accountQueue addAvatarTask:avatar];
 }
-- (void)addThumbTask:(SeafThumb * _Nonnull)thumb
-{
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:thumb.accountIdentifier];
+
+- (void)addThumbTask:(SeafThumb * _Nonnull)thumb {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:thumb.file->connection];
+    if ([accountQueue resumeCancelledThumbTask:thumb]) {
+        // 如果恢复了一个已取消的任务，则直接返回
+        return;
+    }
     [accountQueue addThumbTask:thumb];
 }
 
-- (void)removeThumbTaskFromAccountQueue:(SeafThumb * _Nonnull)thumb
-{
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:thumb.accountIdentifier];
+- (void)removeThumbTaskFromAccountQueue:(SeafThumb * _Nonnull)thumb {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:thumb.file->connection];
     [accountQueue removeThumbTask:thumb];
 }
 
-/**
- * Retrieves an account task queue associated with a specific identifier.
- * @param identifier The identifier associated with the account.
- * @return An instance of SeafAccountTaskQueue associated with the given identifier.
- */
-- (SeafAccountTaskQueue *)getAccountQueueWithIndentifier:(NSString *)identifier
+#pragma mark - Account Queue Management
+
+- (SeafAccountTaskQueue *)accountQueueForConnection:(SeafConnection *)connection
 {
     @synchronized(self.accountQueueDict) {
-        SeafAccountTaskQueue *accountQueue = [self.accountQueueDict valueForKey:identifier];
+        SeafAccountTaskQueue *accountQueue = [self.accountQueueDict objectForKey:connection.accountIdentifier];
         if (!accountQueue) {
             accountQueue = [[SeafAccountTaskQueue alloc] init];
-
-            __weak typeof(self) weakSelf = self;
-            accountQueue.uploadQueue.taskCompleteBlock = ^(id<SeafTask>  _Nonnull task, BOOL result) {
-                if (weakSelf.finishBlock)  weakSelf.finishBlock(task);
-                SeafUploadFile *ufile = (SeafUploadFile*)task;
-                if (result) {
-                    if (ufile.retryable) { // Do not remove now, will remove it next time
-                        [weakSelf saveUploadFileToTaskStorage:ufile];
-                    }
-                } else if (!ufile.retryable) {
-                    // Remove upload file local cache
-                    [ufile cleanup];
-                }
-            };
-            accountQueue.fileQueue.taskCompleteBlock = ^(id<SeafTask>  _Nonnull task, BOOL result) {
-                if (weakSelf.finishBlock)  weakSelf.finishBlock(task);
-                SeafFile *file = (SeafFile*)task;
-                if (result) {
-                    [weakSelf removeFileTaskInStorage:file];
-                }
-            };
-
-            [self.accountQueueDict setObject:accountQueue forKey:identifier];
+            [self.accountQueueDict setObject:accountQueue forKey:connection.accountIdentifier];
         }
         return accountQueue;
     }
 }
 
-- (SeafAccountTaskQueue *)accountQueueForConnection:(SeafConnection *)connection
-{
-    return [self getAccountQueueWithIndentifier:connection.accountIdentifier];
+- (void)removeAccountQueue:(SeafConnection *_Nullable)conn {
+    @synchronized(self.accountQueueDict) {
+        SeafAccountTaskQueue *accountQueue = [self.accountQueueDict objectForKey:conn.accountIdentifier];
+        if (accountQueue) {
+            [accountQueue cancelAllTasks];
+            [self.accountQueueDict removeObjectForKey:conn.accountIdentifier];
+        }
+        [self removeAccountDownloadTaskFromStorage:conn.accountIdentifier];
+        [self removeAccountUploadTaskFromStorage:conn.accountIdentifier];
+    }
 }
 
-/**
- * Saves information about an upload file task to persistent storage.
- * @param ufile The upload file whose information is to be saved.
- */
+#pragma mark - Task Persistence
+
 - (void)saveUploadFileToTaskStorage:(SeafUploadFile *)ufile {
     NSString *key = [self uploadStorageKey:ufile.accountIdentifier];
     NSDictionary *dict = [self convertTaskToDict:ufile];
@@ -244,10 +136,6 @@
     }
 }
 
-/**
- * Saves information about a file download task to persistent storage.
- * @param file The file whose information is to be saved.
- */
 - (void)saveFileToTaskStorage:(SeafFile *)file {
     NSString *key = [self downloadStorageKey:file.accountIdentifier];
     NSDictionary *dict = [self convertTaskToDict:file];
@@ -258,13 +146,8 @@
     }
 }
 
-/**
- * Removes information about an upload file task from persistent storage.
- * @param ufile The upload file whose information is to be removed.
- */
 - (void)removeUploadFileTaskInStorage:(SeafUploadFile *)ufile {
     NSString *key = [self uploadStorageKey:ufile.accountIdentifier];
-    
     @synchronized(self) {
         NSMutableDictionary *taskStorage = [NSMutableDictionary dictionaryWithDictionary:[SeafStorage.sharedObject objectForKey:key]];
         [taskStorage removeObjectForKey:ufile.lpath];
@@ -272,47 +155,19 @@
     }
 }
 
-/**
- * Removes information about a file download task from persistent storage.
- * @param file The file whose information is to be removed.
- */
-- (void)removeFileTaskInStorage:(SeafFile *)file {
-    NSString *key = [self downloadStorageKey:file.accountIdentifier];
-    
-    @synchronized(self) {
-        NSMutableDictionary *taskStorage = [NSMutableDictionary dictionaryWithDictionary:[SeafStorage.sharedObject objectForKey:key]];
-        [taskStorage removeObjectForKey:file.uniqueKey];
-        [SeafStorage.sharedObject setObject:taskStorage forKey:key];
-    }
+
+- (NSString *)downloadStorageKey:(NSString *)accountIdentifier {
+    return [NSString stringWithFormat:@"%@/%@", KEY_DOWNLOAD, accountIdentifier];
 }
 
-/**
- * Retrieves the storage key for file download tasks associated with a specific account.
- * @param accountIdentifier The identifier for the account.
- * @return A string representing the storage key for download tasks.
- */
-- (NSString*)downloadStorageKey:(NSString*)accountIdentifier {
-    return [NSString stringWithFormat:@"%@/%@",KEY_DOWNLOAD,accountIdentifier];
+- (NSString *)uploadStorageKey:(NSString *)accountIdentifier {
+    return [NSString stringWithFormat:@"%@/%@", KEY_UPLOAD, accountIdentifier];
 }
 
-/**
- * Retrieves the storage key for file upload tasks associated with a specific account.
- * @param accountIdentifier The identifier for the account.
- * @return A string representing the storage key for upload tasks.
- */
-- (NSString*)uploadStorageKey:(NSString*)accountIdentifier {
-     return [NSString stringWithFormat:@"%@/%@",KEY_UPLOAD,accountIdentifier];
-}
-
-/**
- * Converts a task object into a dictionary representation for storage.
- * @param task The task to be converted.
- * @return A dictionary representation of the task.
- */
-- (NSMutableDictionary*)convertTaskToDict:(id)task {
+- (NSMutableDictionary *)convertTaskToDict:(id)task {
     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
     if ([task isKindOfClass:[SeafFile class]]) {
-        SeafFile *file = (SeafFile*)task;
+        SeafFile *file = (SeafFile *)task;
         [Utils dict:dict setObject:file.oid forKey:@"oid"];
         [Utils dict:dict setObject:file.repoId forKey:@"repoId"];
         [Utils dict:dict setObject:file.name forKey:@"name"];
@@ -320,7 +175,7 @@
         [Utils dict:dict setObject:[NSNumber numberWithLongLong:file.mtime] forKey:@"mtime"];
         [Utils dict:dict setObject:[NSNumber numberWithLongLong:file.filesize] forKey:@"size"];
     } else if ([task isKindOfClass:[SeafUploadFile class]]) {
-        SeafUploadFile *ufile = (SeafUploadFile*)task;
+        SeafUploadFile *ufile = (SeafUploadFile *)task;
         [Utils dict:dict setObject:ufile.lpath forKey:@"lpath"];
         [Utils dict:dict setObject:[NSNumber numberWithBool:ufile.overwrite] forKey:@"overwrite"];
         [Utils dict:dict setObject:ufile.udir.oid forKey:@"oid"];
@@ -335,25 +190,22 @@
             [Utils dict:dict setObject:ufile.editedFileRepoId forKey:@"editedFileRepoId"];
             [Utils dict:dict setObject:ufile.editedFileOid forKey:@"editedFileOid"];
         }
-
         [Utils dict:dict setObject:[NSNumber numberWithBool:ufile.isUploaded] forKey:@"uploaded"];
     }
     return dict;
 }
 
-/**
- * Starts any unfinished tasks from the last session associated with a specific connection.
- * @param conn The connection whose tasks are to be started.
- */
+#pragma mark - Starting Unfinished Tasks
+
 - (void)startLastTimeUnfinshTaskWithConnection:(SeafConnection *)conn {
     NSString *downloadKey = [self downloadStorageKey:conn.accountIdentifier];
     NSDictionary *downloadTasks = [SeafStorage.sharedObject objectForKey:downloadKey];
     if (downloadTasks.allValues.count > 0) {
         for (NSDictionary *dict in downloadTasks.allValues) {
             NSNumber *mtimeNumber = [dict objectForKey:@"mtime"];
-
+            
             NSString *oid = [Utils getNewOidFromMtime:[mtimeNumber longLongValue] repoId:[dict objectForKey:@"repoId"] path:[dict objectForKey:@"path"]];
-                        
+            
             SeafFile *file = [[SeafFile alloc] initWithConnection:conn oid:oid repoId:[dict objectForKey:@"repoId"] name:[dict objectForKey:@"name"] path:[dict objectForKey:@"path"] mtime:[[dict objectForKey:@"mtime"] longLongValue] size:[[dict objectForKey:@"size"] longLongValue]];
             [self addFileDownloadTask:file];
         }
@@ -401,122 +253,90 @@
     }
 }
 
-/**
- * Removes all tasks associated with a specific account queue.
- * @param conn The connection whose task queue is to be removed.
- */
-- (void)removeAccountQueue:(SeafConnection *_Nullable)conn {
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:conn.accountIdentifier];
-    [accountQueue clearTasks];
+#pragma mark - Canceling Tasks
+
+//- (void)cancelAutoSyncTasks:(SeafConnection *)conn {
+//    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:conn];
+//    [accountQueue.uploadQueue cancelAllOperations];
+//}
+
+- (void)cancelAllDownloadTasks:(SeafConnection * _Nonnull)conn {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:conn];
+//    [accountQueue.downloadQueue cancelAllOperations];
+    [accountQueue cancelAllDownloadTasks];
     [self removeAccountDownloadTaskFromStorage:conn.accountIdentifier];
+}
+
+- (void)cancelAllUploadTasks:(SeafConnection * _Nonnull)conn {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:conn];
+//    [accountQueue.uploadQueue cancelAllOperations];
+    [accountQueue cancelAllUploadTasks];
     [self removeAccountUploadTaskFromStorage:conn.accountIdentifier];
 }
 
-/**
- * Retrieves all upload tasks that are within a specific directory.
- * @param dir The directory within which the upload tasks are to be retrieved.
- * @return An array containing all the upload tasks within the specified directory.
- */
-- (NSArray *)getUploadTasksInDir:(SeafDir *)dir {
-    SeafAccountTaskQueue *accountQueue = [self getAccountQueueWithIndentifier:dir->connection.accountIdentifier];
-    NSMutableArray *filesInDir = [NSMutableArray new];
-    for (SeafUploadFile *ufile in accountQueue.uploadQueue.allTasks) {
-        //Check if the uploaded file belongs to the current folder.
-        if (!ufile.isEditedFile && [ufile.udir.repoId isEqualToString: dir.repoId] && [ufile.udir.path isEqualToString: dir.path]) {
-            [filesInDir addObject:ufile];
-        }
-    }
+#pragma mark - Helper Methods
 
-    return filesInDir;
-}
-
-/**
- * Removes all download tasks associated with a specific account from storage.
- * @param accountIdentifier The identifier of the account whose download tasks are to be removed.
- */
 - (void)removeAccountDownloadTaskFromStorage:(NSString *)accountIdentifier {
     NSString *key = [self downloadStorageKey:accountIdentifier];
     [SeafStorage.sharedObject removeObjectForKey:key];
 }
 
-/**
- * Removes all upload tasks associated with a specific account from storage.
- * @param accountIdentifier The identifier of the account whose upload tasks are to be removed.
- */
 - (void)removeAccountUploadTaskFromStorage:(NSString *)accountIdentifier {
     NSString *key = [self uploadStorageKey:accountIdentifier];
     [SeafStorage.sharedObject removeObjectForKey:key];
 }
 
-- (void)applicationWillEnterForeground:(NSNotification *)notif {
-    [self.taskTimer invalidate];
-    self.taskTimer = nil;
-    self.taskTimer = [NSTimer scheduledTimerWithTimeInterval:1*60 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
+- (NSArray * _Nullable)getUploadTasksInDir:(SeafDir *)dir connection:(SeafConnection * _Nonnull)connection {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:connection];
+    return [accountQueue getUploadTasksInDir:dir];
 }
 
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
-@end
-
-#pragma mark- SeafAccountTaskQueue
-
-@implementation SeafAccountTaskQueue
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        self.fileQueue = [[SeafTaskQueue alloc] init];
-        self.thumbQueue = [[SeafTaskQueue alloc] init];
-        self.avatarQueue = [[SeafTaskQueue alloc] init];
-        self.uploadQueue = [[SeafTaskQueue alloc] init];
-        self.uploadQueue.attemptInterval = 180;
+//从connection获取队列状态
+- (NSArray *)getOngoingUploadTasksFromConnection: (SeafConnection *)connection {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:connection];
+    NSMutableArray *ongoingTasks = [NSMutableArray array];
+    for (SeafUploadOperation *operation in accountQueue.uploadQueue.operations) {
+        if (operation.isExecuting && !operation.isFinished) {
+            [ongoingTasks addObject:operation.uploadFile];
+        }
     }
-    return self;
+    return ongoingTasks;
 }
 
-- (void)addFileDownloadTask:(SeafFile * _Nonnull)dfile {
-    [self.fileQueue addTask:dfile];
+// get the on going download tasks
+- (NSArray *)getOngoingDownloadTasks: (SeafConnection *)connection {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:connection];
+    NSMutableArray *ongoingTasks = [NSMutableArray array];
+    for (SeafDownloadOperation *operation in accountQueue.downloadQueue.operations) {
+        if (operation.isExecuting && !operation.isFinished) {
+            [ongoingTasks addObject:operation.file];
+        }
+    }
+    return ongoingTasks;
 }
 
-- (void)addThumbTask:(SeafThumb * _Nonnull)thumb {
-    [self.thumbQueue addTask:thumb];
+// 获取已完成的上传任务
+- (NSArray *)getCompletedUploadTasks: (SeafConnection *)connection {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:connection];
+    NSMutableArray *completedTasks = [NSMutableArray array];
+    for (SeafUploadOperation *operation in accountQueue.uploadQueue.operations) {
+        if (operation.isFinished && !operation.isCancelled) {
+            [completedTasks addObject:operation.uploadFile];
+        }
+    }
+    return completedTasks;
 }
 
-- (void)addAvatarTask:(SeafAvatar * _Nonnull)avatar {
-    [self.avatarQueue addTask:avatar];
-}
-
-- (BOOL)addUploadTask:(SeafUploadFile * _Nonnull)ufile {
-    return [self.uploadQueue addTask:ufile];
-}
-
-- (void)removeFileDownloadTask:(SeafFile * _Nonnull)dfile {
-    [self.fileQueue removeTask:dfile];
-}
-- (void)removeUploadTask:(SeafUploadFile * _Nonnull)ufile {
-    [self.uploadQueue removeTask:ufile];
-}
-- (void)removeAvatarTask:(SeafAvatar * _Nonnull)avatar {
-    [self.avatarQueue removeTask:avatar];
-}
-- (void)removeThumbTask:(SeafThumb * _Nonnull)thumb {
-    [self.thumbQueue removeTask:thumb];
-}
-
-- (void)tick {
-    [self.fileQueue tick];
-    [self.thumbQueue tick];
-    [self.avatarQueue tick];
-    [self.uploadQueue tick];
-}
-
-- (void)clearTasks {
-    [self.fileQueue clearTasks];
-    [self.thumbQueue clearTasks];
-    [self.avatarQueue clearTasks];
-    [self.uploadQueue clearTasks];
+// 获取已完成的下载任务
+- (NSArray *)getCompletedDownloadTasks: (SeafConnection *)connection {
+    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:connection];
+    NSMutableArray *completedTasks = [NSMutableArray array];
+    for (SeafDownloadOperation *operation in accountQueue.downloadQueue.operations) {
+        if (operation.isFinished && !operation.isCancelled) {
+            [completedTasks addObject:operation.file];
+        }
+    }
+    return completedTasks;
 }
 
 @end

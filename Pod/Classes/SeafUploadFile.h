@@ -33,10 +33,10 @@ typedef void (^SeafUploadCompletionBlock)(SeafUploadFile *file, NSString *oid, N
 @property (nonatomic, copy) NSString *lpath;/// The local path of the file to be uploaded.
 
 @property (readonly) NSString *name;
-@property (readonly) long long filesize;
+@property (nonatomic, assign) long long filesize;
 
-@property (nonatomic, readonly, getter=isUploaded) BOOL uploaded;
-@property (nonatomic, readonly, getter=isUploading) BOOL uploading;
+@property (nonatomic, assign, getter=isUploaded) BOOL uploaded;
+@property (nonatomic, assign, getter=isUploading) BOOL uploading;
 
 @property (readwrite) BOOL overwrite;
 @property (nonatomic, readonly) PHAsset *asset;/// The associated PHAsset, if the file is a photo from the photo library.
@@ -73,6 +73,17 @@ typedef void (^SeafUploadCompletionBlock)(SeafUploadFile *file, NSString *oid, N
 
 @property (assign, nonatomic) BOOL shouldShowUploadFailure; // When modifying the file and uploading again during the upload editing process, do not show the upload failure dialog
 
+@property (strong) NSProgress *progress;
+
+@property (strong) NSArray *missingblocks;
+@property (strong) NSArray *allblocks;
+@property (strong) NSString *commiturl;
+@property (strong) NSString *rawblksurl;
+@property (strong) NSString *uploadpath;
+@property (nonatomic, strong) NSString *blockDir;
+@property long blkidx;
+
+
 /**
  * Initializes a SeafUploadFile with a local path.
  * @param lpath The local path of the file to be uploaded.
@@ -102,4 +113,14 @@ typedef void (^SeafUploadCompletionBlock)(SeafUploadFile *file, NSString *oid, N
  * Asynchronously get photo library images.
  */
 - (void)iconWithCompletion:(void (^)(UIImage *image))completion;
+
+// Prepare for upload
+- (void)prepareForUploadWithCompletion:(void (^)(BOOL success, NSError *error))completion;
+
+- (void)finishUpload:(BOOL)result oid:(NSString *)oid error:(NSError *)error;
+
+- (void)updateProgress:(NSProgress *)progress;
+
+-(void)updateProgressWithoutKVO:(NSProgress *)progress;
+
 @end

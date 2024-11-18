@@ -57,14 +57,15 @@
     for (SeafConnection *conn in SeafGlobal.sharedObject.conns) {
         if (conn.inAutoSync) return true;
     }
-    NSInteger totalDownloadingNum = 0;
-    NSInteger totalUploadingNum = 0;
+//    NSInteger totalDownloadingNum = 0;
+    NSInteger totalOngoingNum = 0;
     for (SeafConnection *conn in SeafGlobal.sharedObject.conns) {
         SeafAccountTaskQueue *accountQueue =[SeafDataTaskManager.sharedObject accountQueueForConnection:conn];
-        totalUploadingNum += accountQueue.fileQueue.taskNumber + accountQueue.uploadQueue.taskNumber;
+//        totalUploadingNum += accountQueue.downloadQueue.operationCount + accountQueue.uploadQueue.operationCount;
+        totalOngoingNum += [accountQueue getNeedUploadTasks].count + [accountQueue getNeedDownloadTasks].count;
     }
     // Continue if there are any active uploads or downloads.
-    return totalUploadingNum != 0 || totalDownloadingNum != 0;
+    return totalOngoingNum != 0;
 }
 
 // Selects the provided Seafile connection as the active account, updates navigation state.
@@ -319,11 +320,16 @@
         if (@available(iOS 13.0, *)) {
             [application endBackgroundTask:self.bgTask];
             self.needReset = YES;
-            if (SeafGlobal.sharedObject.connection.accountIdentifier) {
-                [[SeafDataTaskManager.sharedObject accountQueueForConnection:SeafGlobal.sharedObject.connection].uploadQueue clearTasks];
+            for (SeafConnection *conn in SeafGlobal.sharedObject.conns) {
+                if (conn.accountIdentifier) {
+//                    [[SeafDataTaskManager.sharedObject accountQueueForConnection:conn] cancelAllUploadTasks];
+//                    [[SeafDataTaskManager.sharedObject accountQueueForConnection:conn] cancelAllDownloadTasks];
+                    [[SeafDataTaskManager.sharedObject accountQueueForConnection:conn] cancelAllTasks];
+                }
             }
-            [self photosDidChange:[NSNotification notificationWithName:@"photosDidChange" object:nil userInfo:@{@"force" : @(YES)}]];
-            [self startBackgroundTask];
+
+//            [self photosDidChange:[NSNotification notificationWithName:@"photosDidChange" object:nil userInfo:@{@"force" : @(YES)}]];
+//            [self startBackgroundTask];
         } else {
             //not work in iOS 13, and while call in app  become active next time
             [self startBackgroundTask];

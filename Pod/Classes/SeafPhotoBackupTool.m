@@ -12,8 +12,8 @@
 #import "SeafConnection.h"
 #import "AFNetworkReachabilityManager.h"
 #import "SeafDir.h"
-#import "SeafUploadFile.h"
 #import "SeafDataTaskManager.h"
+#import <FileProvider/NSFileProviderError.h>
 
 #define DEFAULT_UPLOADINGARRAY_INTERVAL 10*60 // 10 min
 
@@ -116,62 +116,106 @@
         Debug("wifiOnly=%d, isReachableViaWiFi=%d, for server %@", _connection.wifiOnly, [[AFNetworkReachabilityManager sharedManager] isReachableViaWiFi], _connection.address);
         return;
     }
-
-    Debug("Current %u, %u photos need to upload, dir=%@", (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count, dir.path);
-
-    if (self.photoPickupQueue == nil) {
-        self.photoPickupQueue = dispatch_queue_create("com.seafile.photoPickup", DISPATCH_QUEUE_CONCURRENT);
+    
+    PHFetchResult *result = [PHAsset fetchAssetsWithLocalIdentifiers:self.photosArray options:nil];
+    for (PHAsset *asset in result) {
+        if (asset) {
+            SeafPhotoAsset *photoAsset = [[SeafPhotoAsset alloc] initWithAsset:asset isCompress:!self.connection.isUploadHeicEnabled];
+            
+            NSString *path = [self.localUploadDir stringByAppendingPathComponent:photoAsset.name];
+            SeafUploadFile *file = [[SeafUploadFile alloc] initWithPath:path];
+            file.retryable = false;
+            file.uploadFileAutoSync = true;
+            file.overwrite = true;
+            [file setPHAsset:asset url:photoAsset.ALAssetURL];
+            file.udir = dir;
+//            file.delegate = self;
+            [file setCompletionBlock:^(SeafUploadFile *file, NSString *oid, NSError *error) {
+                [self autoSyncFileUploadComplete:file error:error];
+            }];
+            [self saveUploadingFile:file withIdentifier:asset.localIdentifier];
+            Debug("Add file %@ to upload list: %@ current %u %u", photoAsset.name, dir.path, (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count);
+            BOOL res = [SeafDataTaskManager.sharedObject addUploadTask:file];
+//            if (!res) {
+//                [self removeUploadingPhoto:localIdentifier];
+//                [self removeFromUploadingDictWith:localIdentifier];
+//                file = nil;
+//            }
+        }
     }
     
-    @weakify(self);
-    dispatch_async(self.photoPickupQueue, ^{
-        @strongify(self);
-        [self checkAndRemoveFromUploadingArray];
-        int count = 0;
-        while (self.uploadingArray.count < 5 && count++ < 5) {
-            NSString *localIdentifier = [self popUploadPhotoIdentifier];
-            if (!localIdentifier) break;
-            
-            PHFetchResult *result = [PHAsset fetchAssetsWithLocalIdentifiers:@[localIdentifier] options:nil];
-            PHAsset *asset = [result firstObject];
-            if (asset) {
-                SeafPhotoAsset *photoAsset = [[SeafPhotoAsset alloc] initWithAsset:asset isCompress:!self.connection.isUploadHeicEnabled];
-
-                NSString *path = [self.localUploadDir stringByAppendingPathComponent:photoAsset.name];
-                SeafUploadFile *file = [[SeafUploadFile alloc] initWithPath:path];
-                file.retryable = false;
-                file.uploadFileAutoSync = true;
-                file.overwrite = true;
-                [file setPHAsset:asset url:photoAsset.ALAssetURL];
-                file.udir = dir;
-                [file setCompletionBlock:^(SeafUploadFile *file, NSString *oid, NSError *error) {
-                    [self autoSyncFileUploadComplete:file error:error];
-                }];
-                [self saveUploadingFile:file withIdentifier:localIdentifier];
-                Debug("Add file %@ to upload list: %@ current %u %u", photoAsset.name, dir.path, (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count);
-                BOOL res = [SeafDataTaskManager.sharedObject addUploadTask:file];
-                if (!res) {
-                    [self removeUploadingPhoto:localIdentifier];
-                    [self removeFromUploadingDictWith:localIdentifier];
-                    file = nil;
-                }
-            } else {
-                [self removeUploadingPhoto:localIdentifier];
-                [self removeFromUploadingDictWith:localIdentifier];
-                if (self.photSyncWatcher) [self.photSyncWatcher photoSyncChanged:self.photosInSyncing];
-                count--;
-                if (count < 0) {
-                    count = 0;
-                }
-            }
-        }
-        
-//        if (self.photosArray.count == 0) {
-//            Debug("Force check if there are new photos after all synced.");
-//            [self checkPhotos:true];
-//        }
-    });
 }
+
+//- (void)pickPhotosForUpload {
+//    SeafDir *dir = _syncDir;
+//    if (!_inAutoSync || !dir || !self.photosArray || self.photosArray.count == 0) return;
+//    if (_connection.wifiOnly && ![[AFNetworkReachabilityManager sharedManager] isReachableViaWiFi]) {
+//        Debug("wifiOnly=%d, isReachableViaWiFi=%d, for server %@", _connection.wifiOnly, [[AFNetworkReachabilityManager sharedManager] isReachableViaWiFi], _connection.address);
+//        return;
+//    }
+//
+//    Debug("Current %u, %u photos need to upload, dir=%@", (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count, dir.path);
+//
+//    if (self.photoPickupQueue == nil) {
+//        self.photoPickupQueue = dispatch_queue_create("com.seafile.photoPickup", DISPATCH_QUEUE_CONCURRENT);
+//    }
+//    
+//    @weakify(self);
+//    dispatch_async(self.photoPickupQueue, ^{
+//        @strongify(self);
+//        [self checkAndRemoveFromUploadingArray];
+//        int count = 0;
+//        while (self.uploadingArray.count < 5 && count++ < 5) {
+//            NSString *localIdentifier = [self popUploadPhotoIdentifier];
+//            if (!localIdentifier) break;
+//            
+//            PHFetchResult *result = [PHAsset fetchAssetsWithLocalIdentifiers:@[localIdentifier] options:nil];
+//            PHAsset *asset = [result firstObject];
+//            if (asset) {
+//                SeafPhotoAsset *photoAsset = [[SeafPhotoAsset alloc] initWithAsset:asset isCompress:!self.connection.isUploadHeicEnabled];
+//
+//                NSString *path = [self.localUploadDir stringByAppendingPathComponent:photoAsset.name];
+//                SeafUploadFile *file = [[SeafUploadFile alloc] initWithPath:path];
+//                file.retryable = false;
+//                file.uploadFileAutoSync = true;
+//                file.overwrite = true;
+//                [file setPHAsset:asset url:photoAsset.ALAssetURL];
+//                file.udir = dir;
+//                [file setCompletionBlock:^(SeafUploadFile *file, NSString *oid, NSError *error) {
+//                    [self autoSyncFileUploadComplete:file error:error];
+//                }];
+//                [self saveUploadingFile:file withIdentifier:localIdentifier];
+//                Debug("Add file %@ to upload list: %@ current %u %u", photoAsset.name, dir.path, (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count);
+//                BOOL res = [SeafDataTaskManager.sharedObject addUploadTask:file];
+//                if (!res) {
+//                    [self removeUploadingPhoto:localIdentifier];
+//                    [self removeFromUploadingDictWith:localIdentifier];
+//                    file = nil;
+//                }
+//            } else {
+//                [self removeUploadingPhoto:localIdentifier];
+//                [self removeFromUploadingDictWith:localIdentifier];
+//                if (self.photSyncWatcher) [self.photSyncWatcher photoSyncChanged:self.photosInSyncing];
+//                count--;
+//                if (count < 0) {
+//                    count = 0;
+//                }
+//            }
+//        }
+//        
+////        if (self.photosArray.count == 0) {
+////            Debug("Force check if there are new photos after all synced.");
+////            [self checkPhotos:true];
+////        }
+//    });
+//}
+
+//- (void)uploadComplete:(BOOL)success file:(SeafUploadFile *)file oid:(NSString *)oid {
+//    NSError *error = nil;
+//    if (!success) {
+//        error = [[NSError alloc] initWithDomain:NSFileProviderErrorDomain code:NSFileProviderErrorServerUnreachable userInfo:nil];
+//    }
+//}
 
 - (NSString *)popUploadPhotoIdentifier {
     @synchronized(self.photosArray) {
@@ -189,6 +233,7 @@
         [self setPhotoUploadedIdentifier:ufile.assetIdentifier];
         [self removeUploadingPhoto:ufile.assetIdentifier];
         [self removeFromUploadingDictWith:ufile.assetIdentifier];
+        [self.photosArray removeObject:ufile.assetIdentifier];
         Debug("Autosync file %@ %@, remain %u %u", ufile.name, ufile.assetURL, (unsigned)_photosArray.count, (unsigned)_uploadingArray.count);
     } else {
         Warning("Failed to upload photo %@: %@", ufile.name, error);
@@ -199,7 +244,7 @@
     }
     if (_photSyncWatcher) [_photSyncWatcher photoSyncChanged:self.photosInSyncing];
 
-    [self pickPhotosForUpload];
+//    [self pickPhotosForUpload];
 }
 
 //keep _photosArray as the current array of photos that need to be uploaded
@@ -324,7 +369,8 @@
 }
 
 - (void)clearUploadingVideos {
-    [SeafDataTaskManager.sharedObject cancelAutoSyncVideoTasks:self.connection];
+    SeafAccountTaskQueue *accountQueue = [SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection];
+    [accountQueue cancelAutoSyncVideoTasks:self.connection];
     [self removeVideosFromArray:_photosArray];
     [self removeVideosFromArray:_uploadingArray];
 }

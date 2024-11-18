@@ -6,6 +6,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import "SeafUploadFile.h"
 
 @class SeafConnection;
 @class SeafDir;
@@ -25,7 +26,7 @@
 /**
  A utility class for backing up photos to a Seafile server.
  */
-@interface SeafPhotoBackupTool : NSObject
+@interface SeafPhotoBackupTool : NSObject<SeafUploadDelegate>
 
 /// The SeafConnection object managing network operations.
 @property (nonatomic, strong) SeafConnection * _Nonnull connection;

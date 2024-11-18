@@ -16,7 +16,6 @@
 #import "SeafFile.h"
 #import "SeafStorage.h"
 #import "SeafDataTaskManager.h"
-
 #import "ExtentedString.h"
 #import "NSData+Encryption.h"
 #import "Debug.h"
@@ -836,7 +835,7 @@ static AFHTTPRequestSerializer <AFURLRequestSerialization> * _requestSerializer;
     return request;
 }
 
-- (void)sendRequestAsync:(NSString *)url method:(NSString *)method form:(NSString *)form
+- (NSURLSessionDataTask *)sendRequestAsync:(NSString *)url method:(NSString *)method form:(NSString *)form
                  success:(void (^)(NSURLRequest *request, NSHTTPURLResponse *response, id JSON))success
                  failure:(void (^)(NSURLRequest *request, NSHTTPURLResponse *response, id JSON, NSError *error))failure
 {
@@ -880,13 +879,14 @@ static AFHTTPRequestSerializer <AFURLRequestSerialization> * _requestSerializer;
         }
     }];
     [task resume];
+    return task;
 }
 
-- (void)sendRequest:(NSString *)url
+- (NSURLSessionDataTask *)sendRequest:(NSString *)url
             success:(void (^)(NSURLRequest *request, NSHTTPURLResponse *response, id JSON))success
             failure:(void (^)(NSURLRequest *request, NSHTTPURLResponse *response, id JSON, NSError *error))failure
 {
-    [self sendRequestAsync:url method:@"GET" form:nil success:success failure:failure];
+    return [self sendRequestAsync:url method:@"GET" form:nil success:success failure:failure];
 }
 
 - (void)sendOptions:(NSString *)url
@@ -910,11 +910,11 @@ static AFHTTPRequestSerializer <AFURLRequestSerialization> * _requestSerializer;
     [self sendRequestAsync:url method:@"PUT" form:form success:success failure:failure];
 }
 
-- (void)sendPost:(NSString *)url form:(NSString *)form
+- (NSURLSessionDataTask *)sendPost:(NSString *)url form:(NSString *)form
          success:(void (^)(NSURLRequest *request, NSHTTPURLResponse *response, id JSON))success
          failure:(void (^)(NSURLRequest *request, NSHTTPURLResponse *response, id JSON, NSError *error))failure
 {
-    [self sendRequestAsync:url method:@"POST" form:form success:success failure:failure];
+    return [self sendRequestAsync:url method:@"POST" form:form success:success failure:failure];
 }
 
 - (void)loadRepos:(id<SeafDentryDelegate>)degt
@@ -1269,7 +1269,8 @@ static AFHTTPRequestSerializer <AFURLRequestSerialization> * _requestSerializer;
         } else {
             Debug("Stop auto Sync for server %@", _address);
             [self.photoBackup resetAll];
-            [SeafDataTaskManager.sharedObject cancelAutoSyncTasks:self];
+            SeafAccountTaskQueue *accountQueue =[SeafDataTaskManager.sharedObject accountQueueForConnection:self];
+            [accountQueue cancelAutoSyncTasks:self];
             [self clearUploadCache];
         }
     }

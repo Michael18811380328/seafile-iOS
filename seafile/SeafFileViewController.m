@@ -37,6 +37,7 @@
 #import "SeafSearchResultViewController.h"
 #import "UISearchBar+SeafExtend.h"
 #import "UIImage+FileType.h"
+#import "SeafUploadOperation.h"
 
 enum {
     STATE_INIT = 0,
@@ -1171,7 +1172,8 @@ enum {
 
 - (BOOL)checkIsEditedFileUploading:(SeafDir *)entry {
     SeafAccountTaskQueue *accountQueue = [SeafDataTaskManager.sharedObject accountQueueForConnection:self->_connection];
-    NSArray *allUpLoadTasks = accountQueue.uploadQueue.allTasks;
+    NSArray *allUpLoadTasks = [accountQueue getNeedUploadTasks];
+    
     BOOL hasEditedFile = false;
     if (allUpLoadTasks.count > 0) {//if have uploadTask
         NSPredicate *nonNilPredicate = [NSPredicate predicateWithFormat:@"editedFileOid != nil"];
@@ -1181,6 +1183,7 @@ enum {
             SeafBase *__strong item = tempItem; // Declare a strong reference variable to hold tempItem
             if ([item isKindOfClass:[SeafFile class]]) {
                 for (SeafUploadFile *file in nonNilTasks) {
+//                    SeafUploadFile *file = uploadOperation.uploadFile;
                     //check and set uploadFile to SeafFile
                     if ([file.editedFilePath isEqualToString:item.path] && [file.editedFileRepoId isEqualToString:item.repoId]) {
                         SeafFile *fileItem = (SeafFile *)item;
@@ -1493,6 +1496,7 @@ enum {
                 [file loadCache];
                 NSString *path = file.cachePath;
                 if (!path) {
+                    file.state = SEAF_DENTRY_INIT;
                     [file setFileDownloadedBlock:block];
                     [SeafDataTaskManager.sharedObject addFileDownloadTask:file];
                 } else {

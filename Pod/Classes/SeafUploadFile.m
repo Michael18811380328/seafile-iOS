@@ -30,15 +30,7 @@
 @property (readonly) NSString *mime;
 @property (strong, readonly) NSURL *preViewURL;
 @property (strong) NSURLSessionUploadTask *task;
-@property (strong) NSProgress *progress;
 
-@property (strong) NSArray *missingblocks;
-@property (strong) NSArray *allblocks;
-@property (strong) NSString *commiturl;
-@property (strong) NSString *rawblksurl;
-@property (strong) NSString *uploadpath;
-@property (nonatomic, strong) NSString *blockDir;
-@property long blkidx;
 
 @property dispatch_semaphore_t semaphore;
 @property (nonatomic) TaskCompleteBlock taskCompleteBlock;
@@ -301,6 +293,17 @@
 {
     if (![keyPath isEqualToString:@"fractionCompleted"] || ![object isKindOfClass:[NSProgress class]]) return;
     NSProgress *progress = (NSProgress *)object;
+    float fraction = 0;
+    if (_rawblksurl) {
+        fraction = 1.0f*(progress.fractionCompleted + _blkidx)/self.missingblocks.count;
+    } else {
+        fraction = progress.fractionCompleted;
+    }
+    _uProgress = fraction;
+    [self uploadProgress:fraction];
+}
+
+-(void)updateProgressWithoutKVO:(NSProgress *)progress {
     float fraction = 0;
     if (_rawblksurl) {
         fraction = 1.0f*(progress.fractionCompleted + _blkidx)/self.missingblocks.count;
@@ -900,9 +903,19 @@
         if (self.completionBlock) {
             self.completionBlock(self, oid, error);
         }
-        if (self.taskCompleteBlock) {
-            self.taskCompleteBlock(self, !error);
+//        if (self.taskCompleteBlock) {
+//            self.taskCompleteBlock(self, !error);
+//        }
+        
+        if (!error) {
+            if (self.retryable) { // Do not remove now, will remove it next time
+                [self saveUploadFileToTaskStorage:self];
+            }
+        } else if (!self.retryable) {
+            // Remove upload file local cache
+            [self cleanup];
         }
+        
         [self.delegate uploadComplete:!error file:self oid:oid];
         if (self.staredFileDelegate) {
             [self.staredFileDelegate uploadComplete:!error file:self oid:oid];
@@ -910,6 +923,20 @@
     });
 
     dispatch_semaphore_signal(_semaphore);
+}
+
+- (void)saveUploadFileToTaskStorage:(SeafUploadFile *)ufile {
+    NSString *key = [self uploadStorageKey:ufile.accountIdentifier];
+    NSDictionary *dict = [SeafDataTaskManager.sharedObject convertTaskToDict:ufile];
+    @synchronized(self) {
+        NSMutableDictionary *taskStorage = [NSMutableDictionary dictionaryWithDictionary:[SeafStorage.sharedObject objectForKey:key]];
+        [taskStorage setObject:dict forKey:ufile.lpath];
+        [SeafStorage.sharedObject setObject:taskStorage forKey:key];
+    }
+}
+
+- (NSString*)uploadStorageKey:(NSString*)accountIdentifier {
+     return [NSString stringWithFormat:@"%@/%@",KEY_UPLOAD,accountIdentifier];
 }
 
 - (UIImage *)previewImage {
@@ -938,6 +965,40 @@
         _requestOptions.synchronous = NO;
     }
     return _requestOptions;
+}
+
+- (void)prepareForUploadWithCompletion:(void (^)(BOOL success, NSError *error))completion
+{
+    [self checkAsset];
+    // Check if the file exists at the local path
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.lpath]) {
+        NSError *error = [NSError errorWithDomain:@"SeafUploadFile"
+                                             code:-1
+                                         userInfo:@{NSLocalizedDescriptionKey: @"File does not exist at the specified path"}];
+        if (completion) {
+            completion(NO, error);
+        }
+        return;
+    }
+
+    // Get file attributes
+    NSError *error = nil;
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:self.lpath error:&error];
+    if (error) {
+        if (completion) {
+            completion(NO, error);
+        }
+        return;
+    }
+
+    self.filesize = [attrs fileSize];
+
+    // Additional checks can be added here, such as checking available storage, permissions, etc.
+
+    // If everything is okay, call the completion block with success
+    if (completion) {
+        completion(YES, nil);
+    }
 }
 
 @end
