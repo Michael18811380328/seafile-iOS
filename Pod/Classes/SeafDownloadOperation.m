@@ -39,6 +39,10 @@
         _executing = NO;
         _finished = NO;
         _taskList = [NSMutableArray array];
+        
+        _operationCompleted = NO;
+        _observersRemoved = NO;
+        _observersAdded = NO;
     }
     return self;
 }
@@ -174,7 +178,10 @@
                                                                                    progress:^(NSProgress * _Nonnull downloadProgress) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
-        [strongSelf updateProgress:downloadProgress];
+        float fraction = downloadProgress.fractionCompleted;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.file downloadProgress:fraction];
+        });
     } destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
         return [NSURL fileURLWithPath:[target stringByAppendingPathExtension:@"tmp"]];
     } completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
@@ -285,11 +292,10 @@
     __weak __typeof__ (self) wself = self;
     NSURLSessionDownloadTask *task = [self.file->connection.sessionMgr downloadTaskWithRequest:downloadRequest progress:^(NSProgress * _Nonnull downloadProgress) {
         __strong __typeof (wself) sself = wself;
-        sself.file.progress = downloadProgress;
-        [sself.file.progress addObserver:sself.file
-                    forKeyPath:@"fractionCompleted"
-                       options:NSKeyValueObservingOptionNew
-                       context:NULL];
+        float fraction = downloadProgress.fractionCompleted;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [sself.file downloadProgress:fraction];
+        });
     } destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
         return [NSURL fileURLWithPath:target];
     } completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
@@ -367,30 +373,30 @@
     return 0;
 }
 
-- (void)updateProgress:(NSProgress *)progress
-{
-    if (self.file.progress) {
-        [self.file.progress removeObserver:self.file forKeyPath:@"fractionCompleted" context:NULL];
-    }
+//- (void)updateProgress:(NSProgress *)progress
+//{
+//    if (self.file.progress) {
+//        [self.file.progress removeObserver:self.file forKeyPath:@"fractionCompleted" context:NULL];
+//    }
+//
+//    self.file.progress = progress;
+//    if (progress) {
+//        [self.file.progress addObserver:self.file
+//                    forKeyPath:@"fractionCompleted"
+//                       options:NSKeyValueObservingOptionNew
+//                       context:NULL];
+//    }
+//}
 
-    self.file.progress = progress;
-    if (progress) {
-        [self.file.progress addObserver:self.file
-                    forKeyPath:@"fractionCompleted"
-                       options:NSKeyValueObservingOptionNew
-                       context:NULL];
-    }
-}
-
-- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
-{
-    if (![keyPath isEqualToString:@"fractionCompleted"] || ![object isKindOfClass:[NSProgress class]]) return;
-    NSProgress *progress = (NSProgress *)object;
-    float fraction = progress.fractionCompleted;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.file downloadProgress:fraction];
-    });
-}
+//- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+//{
+//    if (![keyPath isEqualToString:@"fractionCompleted"] || ![object isKindOfClass:[NSProgress class]]) return;
+//    NSProgress *progress = (NSProgress *)object;
+//    float fraction = progress.fractionCompleted;
+//    dispatch_async(dispatch_get_main_queue(), ^{
+//        [self.file downloadProgress:fraction];
+//    });
+//}
 
 - (void)finishDownload:(BOOL)success error:(NSError *)error ooid:(NSString *)ooid
 {

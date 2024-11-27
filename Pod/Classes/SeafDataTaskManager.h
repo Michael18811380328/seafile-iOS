@@ -14,7 +14,6 @@
 #import "SeafUploadFile.h"
 #import "SeafFile.h"
 #import "SeafThumb.h"
-#import "SeafAvatar.h"
 #import "SeafAccountTaskQueue.h"
 
 typedef void(^SyncBlock)(id<SeafTask> _Nullable file);
@@ -35,7 +34,6 @@ typedef void(^DownLoadFinshBlock)(id<SeafTask>  _Nonnull task);
 
 - (void)addFileDownloadTask:(SeafFile * _Nonnull)dfile;
 - (BOOL)addUploadTask:(SeafUploadFile * _Nonnull)ufile;
-- (void)addAvatarTask:(SeafAvatar * _Nonnull)avatar;
 - (void)addThumbTask:(SeafThumb * _Nonnull)thumb;
 
 - (void)removeUploadTask:(SeafUploadFile * _Nonnull)ufile forAccount:(SeafConnection * _Nonnull)conn;

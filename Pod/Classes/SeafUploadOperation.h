@@ -12,11 +12,13 @@
 /**
  * SeafUploadOperation handles the network operations for uploading files.
  */
-@interface SeafUploadOperation : NSOperation
+@interface SeafUploadOperation : NSOperation <SeafObservableOperation>
 
 @property (nonatomic, strong) SeafUploadFile *uploadFile;
 
 @property (nonatomic, assign) BOOL observersRemoved;
+@property (nonatomic, assign) BOOL observersAdded;
+
 @property (nonatomic, weak) SeafAccountTaskQueue *accountTaskQueue;
 
 - (instancetype)initWithUploadFile:(SeafUploadFile *)uploadFile;

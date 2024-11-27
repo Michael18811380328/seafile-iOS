@@ -51,6 +51,8 @@
         _finished = NO;
         
         _observersRemoved = NO;
+        _observersAdded = NO;
+        _operationCompleted = NO;
     }
     return self;
 }

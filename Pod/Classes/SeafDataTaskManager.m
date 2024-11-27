@@ -10,7 +10,6 @@
 #import "SeafUploadOperation.h"
 #import "SeafDownloadOperation.h"
 #import "SeafThumbOperation.h"
-#import "SeafAvatarOperation.h"
 #import "SeafDir.h"
 #import "Debug.h"
 #import "SeafStorage.h"
@@ -46,6 +45,10 @@
 #pragma mark - Upload Tasks
 
 - (BOOL)addUploadTask:(SeafUploadFile *)file {
+    return [self addUploadTask:file priority:NSOperationQueuePriorityNormal];
+}
+
+- (BOOL)addUploadTask:(SeafUploadFile *)file priority:(NSOperationQueuePriority)priority {
     SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:file.udir->connection];
     BOOL res = [accountQueue addUploadTask:file];
     if (res && file.retryable) {
@@ -76,13 +79,7 @@
     }
 }
 
-#pragma mark - Avatar and Thumb Tasks
-
-- (void)addAvatarTask:(SeafAvatar * _Nonnull)avatar
-{
-    SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:avatar.connection];
-    [accountQueue addAvatarTask:avatar];
-}
+#pragma mark - Thumb Tasks
 
 - (void)addThumbTask:(SeafThumb * _Nonnull)thumb {
     SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:thumb.file->connection];
