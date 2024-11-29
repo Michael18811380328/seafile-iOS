@@ -7,6 +7,7 @@
 #import "SeafUploadFile.h"
 #import "SeafFile.h"
 #import "SeafThumb.h"
+#import "SeafBaseOperation.h"
 
 @interface SeafAccountTaskQueue : NSObject
 
@@ -64,9 +65,12 @@
 - (void)cancelAutoSyncTasks:(SeafConnection *_Nonnull)conn;
 - (void)cancelAutoSyncVideoTasks:(SeafConnection *_Nonnull)conn;
 
+- (void)postUploadTaskStatusChangedNotification;
+- (void)postDownloadTaskStatusChangedNotification;
+
 @end
 
-@protocol SeafObservableOperation <NSObject>
-@property (nonatomic, assign) BOOL observersRemoved;
-@property (nonatomic, assign) BOOL observersAdded;
-@end
+//@protocol SeafObservableOperation <NSObject>
+//@property (nonatomic, assign) BOOL observersRemoved;
+//@property (nonatomic, assign) BOOL observersAdded;
+//@end

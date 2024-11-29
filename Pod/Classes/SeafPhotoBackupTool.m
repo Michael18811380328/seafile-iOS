@@ -28,7 +28,7 @@
 @property (nonatomic, strong) dispatch_queue_t photoPickupQueue;
 
 //recording the uploading asset identifier with timeStamp
-@property (nonatomic, strong) NSMutableDictionary *uploadingDict;
+//@property (nonatomic, strong) NSMutableDictionary *uploadingDict;
 
 @property (nonatomic, strong) PHFetchResult *fetchResult;
 
@@ -58,15 +58,15 @@
 
 - (void)prepareForBackup {
     _photosArray = [[NSMutableArray alloc] init];
-    _uploadingArray = [[NSMutableArray alloc] init];
-    _uploadingDict = [[NSMutableDictionary alloc] init];
+//    _uploadingArray = [[NSMutableArray alloc] init];
+//    _uploadingDict = [[NSMutableDictionary alloc] init];
 }
 
 - (void)resetAll {
     _photosArray = nil;
     _inCheckPhotos = false;
-    _uploadingArray = nil;
-    _uploadingDict = nil;
+//    _uploadingArray = nil;
+//    _uploadingDict = nil;
     _fetchResult = nil;
 }
 
@@ -89,7 +89,7 @@
     }
     
     //If true check phone photo gallery.
-    if (force || [self photosInSyncing] == 0) {
+    if (force) {
         
         [self filterOutNeedUploadPhotos];
 
@@ -103,7 +103,7 @@
     
     Debug("GroupAll Total %ld photos need to upload: %@", (long)_photosArray.count, _connection.address);
     //refresh UI
-    if (_photSyncWatcher) [_photSyncWatcher photoSyncChanged:self.photosInSyncing];
+//    if (_photSyncWatcher) [_photSyncWatcher photoSyncChanged:self.photosInSyncing];
     
     _inCheckPhotos = false;
     [self pickPhotosForUpload];
@@ -111,9 +111,16 @@
 
 - (void)pickPhotosForUpload {
     SeafDir *dir = _syncDir;
-    if (!_inAutoSync || !dir || !self.photosArray || self.photosArray.count == 0) return;
+    if (!_inAutoSync || !dir || !self.photosArray || self.photosArray.count == 0) {
+        SeafAccountTaskQueue *accountQueue = [SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection];
+        [accountQueue postUploadTaskStatusChangedNotification];
+        return;
+    }
+    
     if (_connection.wifiOnly && ![[AFNetworkReachabilityManager sharedManager] isReachableViaWiFi]) {
         Debug("wifiOnly=%d, isReachableViaWiFi=%d, for server %@", _connection.wifiOnly, [[AFNetworkReachabilityManager sharedManager] isReachableViaWiFi], _connection.address);
+        SeafAccountTaskQueue *accountQueue = [SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection];
+        [accountQueue postUploadTaskStatusChangedNotification];
         return;
     }
     
@@ -124,7 +131,7 @@
             
             NSString *path = [self.localUploadDir stringByAppendingPathComponent:photoAsset.name];
             SeafUploadFile *file = [[SeafUploadFile alloc] initWithPath:path];
-            file.retryable = false;
+            file.retryable = true;
             file.uploadFileAutoSync = true;
             file.overwrite = true;
             [file setPHAsset:asset url:photoAsset.ALAssetURL];
@@ -134,7 +141,9 @@
                 [self autoSyncFileUploadComplete:file error:error];
             }];
             [self saveUploadingFile:file withIdentifier:asset.localIdentifier];
-            Debug("Add file %@ to upload list: %@ current %u %u", photoAsset.name, dir.path, (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count);
+            Debug("Add file %@ to upload list: %@ current %u %u", photoAsset.name, dir.path, (unsigned)self.photosArray.count);
+//            Debug("Add file %@ to upload list: %@ current %u %u", photoAsset.name, dir.path, (unsigned)self.photosArray.count, (unsigned)self.uploadingArray.count);
+
             BOOL res = [SeafDataTaskManager.sharedObject addUploadTask:file];
 //            if (!res) {
 //                [self removeUploadingPhoto:localIdentifier];
@@ -221,9 +230,10 @@
     @synchronized(self.photosArray) {
         if (!self.photosArray || self.photosArray.count == 0) return nil;
         NSString *localIdentifier = self.photosArray.firstObject;
-        [self addUploadingPhotoIdentifier:localIdentifier];
+//        [self addUploadingPhotoIdentifier:localIdentifier];
         [self.photosArray removeObject:localIdentifier];
-        Debug("Picked photo identifier: %@ remain: %u %u", localIdentifier, (unsigned)_photosArray.count, (unsigned)_uploadingArray.count);
+        Debug("Picked photo identifier: %@ remain: %u", localIdentifier, (unsigned)_photosArray.count);
+//        Debug("Picked photo identifier: %@ remain: %u %u", localIdentifier, (unsigned)_photosArray.count, (unsigned)_uploadingArray.count);
         return localIdentifier;
     }
 }
@@ -231,20 +241,10 @@
 - (void)autoSyncFileUploadComplete:(SeafUploadFile *)ufile error:(NSError *)error {
     if (!error) {
         [self setPhotoUploadedIdentifier:ufile.assetIdentifier];
-        [self removeUploadingPhoto:ufile.assetIdentifier];
-        [self removeFromUploadingDictWith:ufile.assetIdentifier];
         [self.photosArray removeObject:ufile.assetIdentifier];
-        Debug("Autosync file %@ %@, remain %u %u", ufile.name, ufile.assetURL, (unsigned)_photosArray.count, (unsigned)_uploadingArray.count);
     } else {
         Warning("Failed to upload photo %@: %@", ufile.name, error);
-        // Add photo to the end of queue
-        [self removeUploadingPhoto:ufile.assetIdentifier];
-        [self addUploadPhoto:ufile.assetIdentifier];
-        [self removeFromUploadingDictWith:ufile.assetIdentifier];
     }
-    if (_photSyncWatcher) [_photSyncWatcher photoSyncChanged:self.photosInSyncing];
-
-//    [self pickPhotosForUpload];
 }
 
 //keep _photosArray as the current array of photos that need to be uploaded
@@ -308,22 +308,12 @@
 
 
 - (NSUInteger)photosInSyncing {
-    return self.photosArray.count + self.uploadingArray.count;
+    return self.photosArray.count;
 }
 
 //Determine whether it has been uploaded and recorded in realm.
 - (BOOL)IsPhotoUploaded:(SeafPhotoAsset *)asset {
-    //before iOS9 check ALAssetURL is available
-    if (asset.ALAssetURL && [asset.ALAssetURL respondsToSelector:NSSelectorFromString(@"absoluteString")] && asset.ALAssetURL.absoluteString) {
-        NSString *value = [self getCachedPhotoStatuWithIdentifier:[self.accountIdentifier stringByAppendingString:asset.ALAssetURL.absoluteString]];
-        if (value != nil) {
-            return YES;
-        }
-    }
-    
-    //after iOS9 check photo is existed in Realm.
     NSString *realmAssetId = [self.accountIdentifier stringByAppendingString:asset.localIdentifier];
-    
     return [[SeafRealmManager shared] isPhotoExistInRealm:realmAssetId forAccount:self.accountIdentifier];
 }
 
@@ -334,45 +324,56 @@
     @synchronized(self.photosArray) {
         if ([self.photosArray containsObject:asset.localIdentifier]) return true;
     }
-    @synchronized(self.uploadingArray) {
-        if ([self.uploadingArray containsObject:asset.localIdentifier]) return true;
-    }
+
     return false;
 }
 
+//- (BOOL)IsPhotoUploading:(SeafPhotoAsset *)asset {
+//    if (!asset) {
+//        return false;
+//    }
+//    @synchronized(self.photosArray) {
+//        if ([self.photosArray containsObject:asset.localIdentifier]) return true;
+//    }
+////    @synchronized(self.uploadingArray) {
+////        if ([self.uploadingArray containsObject:asset.localIdentifier]) return true;
+////    }
+//    return false;
+//}
+
 //If it exceeds 10 minutes, put it at the end of the queue and try again.
-- (void)checkAndRemoveFromUploadingArray {
-    if (self.uploadingArray == nil || self.uploadingDict == nil) {
-        return;
-    }
-    if (self.uploadingArray == 0 && self.uploadingDict.count != 0) {
-        [self.uploadingDict removeAllObjects];
-        return;
-    }
-    NSDictionary *copyDict = [NSDictionary dictionaryWithDictionary:self.uploadingDict];
-    NSArray *copyArray = [NSArray arrayWithArray:self.uploadingArray];
-    for (NSString *identifier in copyArray) {
-        if ([copyDict valueForKey:identifier]) {
-            SeafUploadFile *file = [copyDict valueForKey:identifier];
-            NSTimeInterval t1 = file.uploadStartedTime;
-            NSTimeInterval cur = [[NSDate date] timeIntervalSince1970];
-            if (cur - t1 > DEFAULT_UPLOADINGARRAY_INTERVAL) {
-                [self removeUploadingPhoto:identifier];
-                [self addUploadPhoto:identifier];
-                [self removeFromUploadingDictWith:identifier];
-                if (self.photSyncWatcher) {
-                    [self.photSyncWatcher photoSyncChanged:self.photosInSyncing];
-                }
-            }
-        }
-    }
-}
+//- (void)checkAndRemoveFromUploadingArray {
+//    if (self.uploadingArray == nil || self.uploadingDict == nil) {
+//        return;
+//    }
+//    if (self.uploadingArray == 0 && self.uploadingDict.count != 0) {
+//        [self.uploadingDict removeAllObjects];
+//        return;
+//    }
+//    NSDictionary *copyDict = [NSDictionary dictionaryWithDictionary:self.uploadingDict];
+//    NSArray *copyArray = [NSArray arrayWithArray:self.uploadingArray];
+//    for (NSString *identifier in copyArray) {
+//        if ([copyDict valueForKey:identifier]) {
+//            SeafUploadFile *file = [copyDict valueForKey:identifier];
+//            NSTimeInterval t1 = file.uploadStartedTime;
+//            NSTimeInterval cur = [[NSDate date] timeIntervalSince1970];
+//            if (cur - t1 > DEFAULT_UPLOADINGARRAY_INTERVAL) {
+//                [self removeUploadingPhoto:identifier];
+//                [self addUploadPhoto:identifier];
+//                [self removeFromUploadingDictWith:identifier];
+//                if (self.photSyncWatcher) {
+//                    [self.photSyncWatcher photoSyncChanged:self.photosInSyncing];
+//                }
+//            }
+//        }
+//    }
+//}
 
 - (void)clearUploadingVideos {
     SeafAccountTaskQueue *accountQueue = [SeafDataTaskManager.sharedObject accountQueueForConnection:self.connection];
     [accountQueue cancelAutoSyncVideoTasks:self.connection];
     [self removeVideosFromArray:_photosArray];
-    [self removeVideosFromArray:_uploadingArray];
+//    [self removeVideosFromArray:_uploadingArray];
 }
 
 - (void)addUploadPhoto:(NSString *)localIdentifier {
@@ -387,35 +388,35 @@
     }
 }
 
-- (void)addUploadingPhotoIdentifier:(NSString *)localIdentifier {
-    @synchronized(self.uploadingArray) {
-        [self.uploadingArray addObject:localIdentifier];
-    }
-}
-
-- (void)removeUploadingPhoto:(NSString *)localIdentifier {
-    @synchronized(self.uploadingArray) {
-        [self.uploadingArray removeObject:localIdentifier];
-    }
-}
+//- (void)addUploadingPhotoIdentifier:(NSString *)localIdentifier {
+//    @synchronized(self.uploadingArray) {
+//        [self.uploadingArray addObject:localIdentifier];
+//    }
+//}
+//
+//- (void)removeUploadingPhoto:(NSString *)localIdentifier {
+//    @synchronized(self.uploadingArray) {
+//        [self.uploadingArray removeObject:localIdentifier];
+//    }
+//}
 
 - (void)saveUploadingFile:(SeafUploadFile *)file withIdentifier:(NSString *)identifier {
     if (identifier) {
         @synchronized (self) {
             NSTimeInterval cur = [[NSDate date] timeIntervalSince1970];
             file.uploadStartedTime = cur;
-            [self.uploadingDict setObject:file forKey:identifier];
+//            [self.uploadingDict setObject:file forKey:identifier];
         }
     }
 }
 
-- (void)removeFromUploadingDictWith:(NSString *)identifier {
-    if (identifier) {
-        @synchronized(self.uploadingDict) {
-            [self.uploadingDict removeObjectForKey:identifier];
-        }
-    }
-}
+//- (void)removeFromUploadingDictWith:(NSString *)identifier {
+//    if (identifier) {
+//        @synchronized(self.uploadingDict) {
+//            [self.uploadingDict removeObjectForKey:identifier];
+//        }
+//    }
+//}
 
 - (void)removeVideosFromArray:(NSMutableArray *)arr {
     if (arr.count == 0)
@@ -433,21 +434,21 @@
 - (void)resetUploadedPhotos
 {
     _photosArray = [[NSMutableArray alloc] init];
-    _uploadingDict = [[NSMutableDictionary alloc] init];
-    _uploadingArray = [[NSMutableArray alloc] init];
+//    _uploadingDict = [[NSMutableDictionary alloc] init];
+//    _uploadingArray = [[NSMutableArray alloc] init];
     [[SeafRealmManager shared] clearAllCachedPhotosInAccount:self.accountIdentifier];
 }
 
-- (NSUInteger)photosInUploadingArray {
-    return self.uploadingArray.count;
-}
+//- (NSUInteger)photosInUploadingArray {
+//    return self.uploadingArray.count;
+//}
 
 - (void)resetUploadingArray {
     self.photosArray = nil;
-    self.uploadingArray = nil;
+//    self.uploadingArray = nil;
     
     self.photosArray = [[NSMutableArray alloc] init];
-    self.uploadingArray = [[NSMutableArray alloc] init];
+//    self.uploadingArray = [[NSMutableArray alloc] init];
 }
 
 #pragma mark- cache
@@ -471,8 +472,8 @@
         if (detail.removedObjects.count > 0) {
             for (PHAsset *asset in detail.removedObjects) {
                 NSString *localIdentifier = asset.localIdentifier;
-                [self removeUploadingPhoto:localIdentifier];
-                [self removeFromUploadingDictWith:localIdentifier];
+//                [self removeUploadingPhoto:localIdentifier];
+//                [self removeFromUploadingDictWith:localIdentifier];
                 [self removeNeedUploadPhoto:localIdentifier];
             }
         }
@@ -491,16 +492,16 @@
         }
     }
     
-    if (self.photSyncWatcher) [self.photSyncWatcher photoSyncChanged:self.photosInSyncing];
+//    if (self.photSyncWatcher) [self.photSyncWatcher photoSyncChanged:self.photosInSyncing];
 }
 
 #pragma mark - getter
-- (NSMutableArray *)uploadingArray {
-    if (!_uploadingArray) {
-        _uploadingArray = [[NSMutableArray alloc] init];
-    }
-    return _uploadingArray;
-}
+//- (NSMutableArray *)uploadingArray {
+//    if (!_uploadingArray) {
+//        _uploadingArray = [[NSMutableArray alloc] init];
+//    }
+//    return _uploadingArray;
+//}
 
 - (NSMutableArray *)photosArray {
     if (!_photosArray) {
@@ -509,11 +510,11 @@
     return _photosArray;
 }
 
-- (NSMutableDictionary *)uploadingDict {
-    if (!_uploadingDict) {
-        _uploadingDict = [[NSMutableDictionary alloc] init];
-    }
-    return _uploadingDict;
-}
+//- (NSMutableDictionary *)uploadingDict {
+//    if (!_uploadingDict) {
+//        _uploadingDict = [[NSMutableDictionary alloc] init];
+//    }
+//    return _uploadingDict;
+//}
 
 @end

@@ -88,7 +88,7 @@
         }
     }
     SeafUploadOperation *operation = [[SeafUploadOperation alloc] initWithUploadFile:ufile];
-    operation.accountTaskQueue = self; // Set the weak reference
+//    operation.accountTaskQueue = self; // Set the weak reference
     [operation addObserver:self forKeyPath:@"isExecuting" options:NSKeyValueObservingOptionNew context:NULL];
     [operation addObserver:self forKeyPath:@"isFinished" options:NSKeyValueObservingOptionNew context:NULL];
     [operation addObserver:self forKeyPath:@"isCancelled" options:NSKeyValueObservingOptionNew context:NULL];
@@ -147,6 +147,8 @@
     [self removeDownloadTask:dfile fromArray:self.waitingDownloadTasks];
     [self removeDownloadTask:dfile fromArray:self.ongoingDownloadTasks];
     [self addDownloadTask:dfile toArray:self.cancelledDownloadTasks];
+    
+    [self postDownloadTaskStatusChangedNotification];
 }
 
 - (void)removeUploadTask:(SeafUploadFile * _Nonnull)ufile {
@@ -636,17 +638,17 @@
 
 #pragma mark - 移除观察者
 
-- (void)safelyRemoveObserversFromOperation:(NSOperation<SeafObservableOperation> *)operation {
+- (void)safelyRemoveObserversFromOperation:(SeafBaseOperation *)operation {
     if (operation.observersAdded && !operation.observersRemoved) {
-            @try {
-                [operation removeObserver:self forKeyPath:@"isExecuting"];
-                [operation removeObserver:self forKeyPath:@"isFinished"];
-                [operation removeObserver:self forKeyPath:@"isCancelled"];
-                operation.observersRemoved = YES;
-            } @catch (NSException *exception) {
-                NSLog(@"Exception when removing observer: %@", exception);
-            }
+        @try {
+            [operation removeObserver:self forKeyPath:@"isExecuting"];
+            [operation removeObserver:self forKeyPath:@"isFinished"];
+            [operation removeObserver:self forKeyPath:@"isCancelled"];
+            operation.observersRemoved = YES;
+        } @catch (NSException *exception) {
+            NSLog(@"Exception when removing observer: %@", exception);
         }
+    }
 }
 
 @end

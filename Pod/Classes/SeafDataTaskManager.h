@@ -27,7 +27,7 @@ typedef void(^DownLoadFinshBlock)(id<SeafTask>  _Nonnull task);
  */
 @interface SeafDataTaskManager : NSObject
 
-@property (nonatomic, copy) SyncBlock _Nullable trySyncBlock;
+//@property (nonatomic, copy) SyncBlock _Nullable trySyncBlock;
 @property (nonatomic, copy) DownLoadFinshBlock _Nullable finishBlock;
 
 + (SeafDataTaskManager * _Nonnull)sharedObject;

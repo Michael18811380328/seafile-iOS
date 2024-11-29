@@ -54,9 +54,6 @@
     if (res && file.retryable) {
         [self saveUploadFileToTaskStorage:file];
     }
-    if (self.trySyncBlock) {
-        self.trySyncBlock(file);
-    }
     return res;
 }
 
@@ -73,9 +70,6 @@
     [accountQueue addFileDownloadTask:dfile];
     if (dfile.retryable) {
         [self saveFileToTaskStorage:dfile];
-    }
-    if (self.trySyncBlock) {
-        self.trySyncBlock(dfile);
     }
 }
 
@@ -264,6 +258,7 @@
     [self removeAccountDownloadTaskFromStorage:conn.accountIdentifier];
 }
 
+//取消任务并且清除缓存
 - (void)cancelAllUploadTasks:(SeafConnection * _Nonnull)conn {
     SeafAccountTaskQueue *accountQueue = [self accountQueueForConnection:conn];
 //    [accountQueue.uploadQueue cancelAllOperations];

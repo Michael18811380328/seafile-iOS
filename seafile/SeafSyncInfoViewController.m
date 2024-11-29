@@ -90,7 +90,8 @@ static NSString *cellIdentifier = @"SeafSyncInfoCell";
 
         NSMutableArray *finishedTasks = [NSMutableArray array];
         [finishedTasks addObjectsFromArray:accountQueue.getCompletedSuccessfulDownloadTasks];
-        [finishedTasks addObjectsFromArray:accountQueue.getCompletedFailedDownloadTasks];
+        //失败的不统计在内
+//        [finishedTasks addObjectsFromArray:accountQueue.getCompletedFailedDownloadTasks];
         self.finishedTasks = [finishedTasks copy];
     } else {
         // 分开获取正在上传和等待上传的任务
@@ -99,7 +100,8 @@ static NSString *cellIdentifier = @"SeafSyncInfoCell";
 
         NSMutableArray *finishedTasks = [NSMutableArray array];
         [finishedTasks addObjectsFromArray:accountQueue.getCompletedSuccessfulTasks];
-        [finishedTasks addObjectsFromArray:accountQueue.getCompletedFailedTasks];
+        //失败的不统计在内
+//        [finishedTasks addObjectsFromArray:accountQueue.getCompletedFailedTasks];
         self.finishedTasks = [finishedTasks copy];
     }
 }

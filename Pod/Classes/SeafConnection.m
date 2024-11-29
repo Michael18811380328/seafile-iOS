@@ -1293,7 +1293,9 @@ static AFHTTPRequestSerializer <AFURLRequestSerialization> * _requestSerializer;
 {
     if (!_inAutoSync)
         return;
-    Debug("photos changed %d for server %@, current: %u %u, _syncDir:%@", _inAutoSync, _address, (unsigned)self.photoBackup.photosArray.count, (unsigned)self.photoBackup.uploadingArray.count, _syncDir);
+//    Debug("photos changed %d for server %@, current: %u %u, _syncDir:%@", _inAutoSync, _address, (unsigned)self.photoBackup.photosArray.count, (unsigned)self.photoBackup.uploadingArray.count, _syncDir);
+    Debug("photos changed %d for server %@, current: %u, _syncDir:%@", _inAutoSync, _address, (unsigned)self.photoBackup.photosArray.count, _syncDir);
+
     if (!_syncDir) {
         Warning("Sync dir not exists, create.");
         [self checkPhotosUploadDir:nil];
